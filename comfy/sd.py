@@ -331,6 +331,9 @@ class ModelPatcher:
     def set_model_attn2_patch(self, patch):
         self.set_model_patch(patch, "attn2_patch")
 
+    def set_model_attn2_output_patch(self, patch):
+        self.set_model_patch(patch, "attn2_output_patch")
+
     def model_patches_to(self, device):
         to = self.model_options["transformer_options"]
         if "patches" in to:
@@ -1158,9 +1161,6 @@ def load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, o
         model = model_base.SD21UNCLIP(unet_config, noise_aug_config["params"], v_prediction=v_prediction)
     else:
         model = model_base.BaseModel(unet_config, v_prediction=v_prediction)
-
-    if fp16:
-        model = model.half()
 
     model = load_model_weights(model, sd, verbose=False, load_state_dict_to=load_state_dict_to)
 

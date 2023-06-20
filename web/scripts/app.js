@@ -1447,6 +1447,59 @@ export class ComfyApp {
 		}
 	}
 
+	//loop queue prompt按钮点击后触发的事件
+	async loopqueuePrompt(number, animeStartIndex, animeEndIndex, batchCount = 1) {
+		this.#queueItems.push({ number, batchCount });
+
+		// Only have one action process the items so each one gets a unique seed correctly
+		if (this.#processingQueue) {
+			return;
+		}
+
+		this.#processingQueue = true;
+		this.lastPromptError = null;
+
+		try {
+			while (this.#queueItems.length) {
+				({ number, batchCount } = this.#queueItems.pop());
+
+				for (let i = 0; i < batchCount; i++) {
+					const p = await this.graphToPrompt();
+
+					try {
+						await api.loopQueuePrompt(number, animeStartIndex, animeEndIndex, p);
+					} catch (error) {
+						const formattedError = this.#formatPromptError(error)
+						this.ui.dialog.show(formattedError);
+						if (error.response) {
+							this.lastPromptError = error.response;
+							this.canvas.draw(true, true);
+						}
+						break;
+					}
+
+					for (const n of p.workflow.nodes) {
+						const node = graph.getNodeById(n.id);
+						if (node.widgets) {
+							for (const widget of node.widgets) {
+								// Allow widgets to run callbacks after a prompt has been queued
+								// e.g. random seed after every gen
+								if (widget.afterQueued) {
+									widget.afterQueued();
+								}
+							}
+						}
+					}
+
+					this.canvas.draw(true, true);
+					await this.ui.queue.update();
+				}
+			}
+		} finally {
+			this.#processingQueue = false;
+		}
+	}
+
 	/**
 	 * Loads workflow data from the specified file
 	 * @param {File} file

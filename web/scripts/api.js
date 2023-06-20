@@ -204,6 +204,35 @@ class ComfyApi extends EventTarget {
 		}
 	}
 
+	//相应loopqueueprompt按钮的事件中调用的实际执行部分，顺序：按钮->app.loopQueuePrompt->api.loopQueuePrompt
+	async loopQueuePrompt(number, startIndex, endIndex, { output, workflow }) {
+		const body = {
+			client_id: this.clientId,
+			prompt: output,
+			extra_data: { extra_pnginfo: { workflow }, anime: { is_anime_generate: true, animeStartIndex: startIndex, animeEndIndex: endIndex } },
+		};
+
+		if (number === -1) {
+			body.front = true;
+		} else if (number != 0) {
+			body.number = number;
+		}
+
+		const res = await fetch("/loopprompt", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(body),
+		});
+
+		if (res.status !== 200) {
+			throw {
+				response: await res.json(),
+			};
+		}
+	}
+
 	/**
 	 * Loads a list of items (queue or history)
 	 * @param {string} type The type of items to load, queue or history

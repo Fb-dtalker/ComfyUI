@@ -302,6 +302,7 @@ class PromptExecutor:
             d = self.outputs.pop(o)
             del d
 
+    # 实际执行
     def execute(self, prompt, prompt_id, extra_data={}, execute_outputs=[]):
         nodes.interrupt_processing(False)
 
@@ -349,6 +350,7 @@ class PromptExecutor:
                 # This call shouldn't raise anything if there's an error deep in
                 # the actual SD code, instead it will report the node where the
                 # error was raised
+                # 这里是整个图执行的开始
                 success, error, ex = recursive_execute(self.server, prompt, self.outputs, output_node_id, extra_data, executed, prompt_id, self.outputs_ui)
                 if success is not True:
                     self.handle_execution_error(prompt_id, prompt, current_outputs, executed, error, ex)
@@ -358,6 +360,128 @@ class PromptExecutor:
                 self.old_prompt[x] = copy.deepcopy(prompt[x])
             self.server.last_node_id = None
 
+class LoopPromptExecutor:
+    def __init__(self, server):
+        self.outputs = {}
+        self.outputs_ui = {}
+        self.old_prompt = {}
+        self.server = server
+
+    def handle_execution_error(self, prompt_id, prompt, current_outputs, executed, error, ex):
+        node_id = error["node_id"]
+        class_type = prompt[node_id]["class_type"]
+
+        # First, send back the status to the frontend depending
+        # on the exception type
+        if isinstance(ex, comfy.model_management.InterruptProcessingException):
+            mes = {
+                "prompt_id": prompt_id,
+                "node_id": node_id,
+                "node_type": class_type,
+                "executed": list(executed),
+            }
+            self.server.send_sync("execution_interrupted", mes, self.server.client_id)
+        else:
+            if self.server.client_id is not None:
+                mes = {
+                    "prompt_id": prompt_id,
+                    "node_id": node_id,
+                    "node_type": class_type,
+                    "executed": list(executed),
+
+                    "exception_message": error["exception_message"],
+                    "exception_type": error["exception_type"],
+                    "traceback": error["traceback"],
+                    "current_inputs": error["current_inputs"],
+                    "current_outputs": error["current_outputs"],
+                }
+                self.server.send_sync("execution_error", mes, self.server.client_id)
+
+        # Next, remove the subsequent outputs since they will not be executed
+        to_delete = []
+        for o in self.outputs:
+            if (o not in current_outputs) and (o not in executed):
+                to_delete += [o]
+                if o in self.old_prompt:
+                    d = self.old_prompt.pop(o)
+                    del d
+        for o in to_delete:
+            d = self.outputs.pop(o)
+            del d
+
+    # 实际执行
+    def execute(self, prompt, prompt_id, extra_data={}, execute_outputs=[]):
+        nodes.interrupt_processing(False)
+
+        if "client_id" in extra_data:
+            self.server.client_id = extra_data["client_id"]
+        else:
+            self.server.client_id = None
+
+        if self.server.client_id is not None:
+            self.server.send_sync("execution_start", { "prompt_id": prompt_id}, self.server.client_id)
+
+        # print("prompt", prompt)
+        # print("promptId", prompt_id)
+        # print("extraData", extra_data)
+        # print("executeOupt", execute_outputs)
+
+        with torch.inference_mode():
+            #delete cached outputs if nodes don't exist for them
+            to_delete = []
+            for o in self.outputs:
+                if o not in prompt:
+                    to_delete += [o]
+            for o in to_delete:
+                d = self.outputs.pop(o)
+                del d
+
+            for x in prompt:
+                recursive_output_delete_if_changed(prompt, self.old_prompt, self.outputs, x)
+
+            current_outputs = set(self.outputs.keys())
+            for x in list(self.outputs_ui.keys()):
+                if x not in current_outputs:
+                    d = self.outputs_ui.pop(x)
+                    del d
+
+            if self.server.client_id is not None:
+                self.server.send_sync("execution_cached", { "nodes": list(current_outputs) , "prompt_id": prompt_id}, self.server.client_id)
+            executed = set()
+            output_node_id = None
+            to_execute = []
+
+            for node_id in list(execute_outputs):
+                to_execute += [(0, node_id)]
+
+            # index = 0
+            # to_execute_copy = to_execute.copy()
+            # while index < 10 :
+            # to_execute = to_execute_copy
+            # prompt['14']['inputs']['startIndex'] = prompt['14']['inputs']['startIndex'] + 1
+            # prompt['14']['is_changed'] = True
+            while len(to_execute) > 0:
+                #always execute the output that depends on the least amount of unexecuted nodes first
+                to_execute = sorted(list(map(lambda a: (len(recursive_will_execute(prompt, self.outputs, a[-1])), a[-1]), to_execute)))
+                output_node_id = to_execute.pop(0)[-1]
+
+
+                # This call shouldn't raise anything if there's an error deep in
+                # the actual SD code, instead it will report the node where the
+                # error was raised
+                # 这里是整个图执行的开始
+                success, error, ex = recursive_execute(self.server, prompt, self.outputs, output_node_id, extra_data, executed, prompt_id, self.outputs_ui)
+                if success is not True:
+                    self.handle_execution_error(prompt_id, prompt, current_outputs, executed, error, ex)
+                    break
+
+            for x in executed:
+                self.old_prompt[x] = copy.deepcopy(prompt[x])
+            self.server.last_node_id = None
+
+            # index = index + 1
+                # print("index:", index)
+                # print("to_execute_num", len(to_execute_copy))
 
 
 def validate_inputs(prompt, item, validated):
@@ -667,6 +791,7 @@ class PromptQueue:
         self.currently_running = {}
         self.history = {}
         server.prompt_queue = self
+        server.loop_prompt_queue = self
 
     def put(self, item):
         with self.mutex:

@@ -502,6 +502,50 @@ export class ComfyUI {
 				textContent: "Queue Prompt",
 				onclick: () => app.queuePrompt(0, this.batchCount),
 			}),
+			$el("button.comfy-loopqueue-btn", {
+				id: "loop-queue-button",
+				textContent: "Loop Queue Prompt",
+				onclick: () => {
+					if(this.animeStartIndex == null){
+						var startInput = document.getElementById("anime-comfy-loopqueuestart-input")
+						this.animeStartIndex = startInput.value
+					}
+
+					if(this.animeEndIndex == null){
+						var endInput = document.getElementById("anime-comfy-loopqueueend-input")
+						this.animeEndIndex = endInput.value
+					}
+					if(Number(this.animeStartIndex).toString() == "NaN" || Number(this.animeEndIndex).toString() == "NaN"){
+						console.log("animeStartIndex或animeEndIndex值非法，只能填入数字！")
+					}
+					app.loopqueuePrompt(0, parseInt(this.animeStartIndex), parseInt(this.animeEndIndex), 1)
+				},
+			}),
+			$el("div", { id: "anime-extra-options", style: { width: "100%", display: "block" } }, [
+				$el("label", { innerHTML: "Anime Step" }),
+				$el("div",[
+					$el("input",{
+						id: "anime-comfy-loopqueuestart-input",
+						type: "number",
+						value: 0,
+						min: "0",
+						style: { width: "35%", "margin-left": "0.4em" },
+						oninput:(i)=>{
+							this.animeStartIndex = i.target.value;
+						}
+					}),
+					$el("input",{
+						id: "anime-comfy-loopqueueend-input",
+						type: "number",
+						value: 1,
+						min: "1",
+						style: { width: "35%", "margin-left": "0.4em" },
+						oninput:(i)=>{
+							this.animeEndIndex = i.target.value;
+						}
+					}),
+				]),
+			]),
 			$el("div", {}, [
 				$el("label", { innerHTML: "Extra options" }, [
 					$el("input", {
